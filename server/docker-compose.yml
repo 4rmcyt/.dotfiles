@@ -1,0 +1,141 @@
+version: '2.2'
+services:
+  nginxproxymanager:
+    image: 'jc21/nginx-proxy-manager:latest'
+    container_name: nginxproxymanager
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '81:81'
+      - '443:443'
+    volumes:
+      - ~/media-server/docker/nginx/data:/data
+      - ~/media-server/docker/nginx/letsencrypt:/etc/letsencrypt
+
+  portainer:
+    image: portainer/portainer-ee:latest
+    container_name: portainer
+    restart: always
+    ports:
+      - 9443:9443
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ~/media-server/docker/portainer/data:/data
+      - ~/media-server/docker/shared:/shared
+    environment:
+      - TZ="America/Edmonton"
+  gluetun:
+    image: qmcgaw/gluetun
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - VPN_SERVICE_PROVIDER=surfshark
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=KMNRJIHIMJYyzYi6hQ9K7xZe6INTDXrAMfrHc6svQ2c=
+      - WIREGUARD_ADDRESSES=10.14.0.2/16
+      - SERVER_HOSTNAMES=ca-van.prod.surfshark.com
+    ports:
+      - "0.0.0.0:9091:9091/tcp"   # <-- ports go here, not below
+      - 51413:51413/tcp
+      - 51413:51413/udp
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    ports:
+      - 3000:3000
+    volumes:
+      - ~/media-server/docker/homepage/config:/app/config # Make sure your local config directory exists
+      - /var/run/docker.sock:/var/run/docker.sock # (optional) For docker integrations, see alternative methods
+    environment:
+    -  PUID=1000
+    -  PGID=1000
+  dockerproxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:latest
+    container_name: dockerproxy
+    environment:
+        - CONTAINERS=1 # Allow access to viewing containers
+        - POST=0 # Disallow any POST operations (effectively read-only)
+    ports:
+        - 2375:2375
+    volumes:
+        - /var/run/docker.sock:/var/run/docker.sock:ro # Mounted as read-only
+    restart: unless-stopped
+
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: transmission
+    network_mode: "service:gluetun"  # <-- important bit, don't forget
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Edmonton
+    volumes:
+      - ~/media-server/docker/Downloads/:/downloads
+      - ~/media-server/docker/transmission/transmission-config:/config
+    restart: unless-stopped
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - VERSION=docker
+      - TZ=America/Edmonton
+    volumes:
+      - ~/media-server/docker/plex/config:/config
+      - ~/media-server:/media
+      - ~/media-server/docker/Downloads/tvseries:/tv
+    restart: unless-stopped
+  gluetun_proxy_ua:
+    image: qmcgaw/gluetun
+    container_name: gluetun_proxy
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - VPN_SERVICE_PROVIDER=surfshark
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=KMNRJIHIMJYyzYi6hQ9K7xZe6INTDXrAMfrHc6svQ2c=
+      - WIREGUARD_ADDRESSES=10.14.0.2/16
+      - SERVER_HOSTNAMES=ua-iev.prod.surfshark.com
+      - HTTPPROXY=on
+      - HTTPPROXY_LOG=on
+      # - HTTPPROXY_USER=
+      # - HTTPPROXY_PASSWORD=
+    ports:
+      - 8888:8888/tcp
+      - 8888:8888/udp
+  # gluetun_proxy_il:
+  #   image: qmcgaw/gluetun
+  #   container_name: gluetun_proxy
+  #   cap_add:
+  #     - NET_ADMIN
+  #   environment:
+  #     - VPN_SERVICE_PROVIDER=surfshark
+  #     - VPN_TYPE=wireguard
+  #     - WIREGUARD_PRIVATE_KEY=KMNRJIHIMJYyzYi6hQ9K7xZe6INTDXrAMfrHc6svQ2c=
+  #     - WIREGUARD_ADDRESSES=10.14.0.2/16
+  #     - SERVER_HOSTNAMES=il-tlv.prod.surfshark.com
+  #     - HTTPPROXY=on
+        # - HTTPPROXY_LOG=on
+  #     # - HTTPPROXY_USER=
+  #     # - HTTPPROXY_PASSWORD=
+  #   ports:
+  #     - 8888:8888/tcp
+  #     - 8888:8888/udp  -
+  ps3netsrv:
+    image: shawly/ps3netsrv
+    environment:
+      - TZ=America/Edmonton
+      - USER_ID=38008
+      - GROUP_ID=38008
+    ports:
+      - "38008:38008"
+    volumes:
+      - ~/media-server/docker/ps3games:/games:rw
+  dozzle:
+    image: amir20/dozzle:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - 8080:8080

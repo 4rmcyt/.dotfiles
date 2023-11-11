@@ -1,0 +1,161 @@
+version: "3.8"
+
+services:
+  traefik2:
+    image: traefik:latest
+    restart: always
+    container_name: traefik
+    ports:
+      - "80:80"
+      - "443:443"
+    command:
+      - --providers.docker=true
+      - --api.dashboard=true
+      - --certificateresolvers.letsencrypt.acme.dnschallenge=true
+      - --certificateresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare
+      - --certificateresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificateresolvers.letsencrypt.acme.storage=/acme.json
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --entrypoints.websecure.http.tls=true
+      - --entrypoints.websecure.http.tls.certResolver=letsencrypt
+      - --entrypoints.websecure.http.tls.domains[0].main=${DOMAINNAME}
+      - --entrypoints.websecure.http.tls.domains[0].sans=*.${DOMAINNAME}
+      - --serverstransport.insecureskipverify=true
+    environment:
+      - CLOUDFLARE_EMAIL=${ACME_EMAIL}
+      - CLOUDFLARE_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      traefik_proxy:
+        ipv4_address: ${IPV4_ADDRESS_TRAEFIK}
+  pihole:
+    image: pihole/pihole:latest
+    restart: always
+    container_name: pihole
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+    dns:
+      - 127.0.0.1
+      - 1.1.1.1
+    networks:
+      traefik_proxy:
+        ipv4_address: ${IPV4_ADDRESS_PIHOLE}
+    environment:
+      - TZ='${TZ}'
+      - WEBPASSWORD=${WEBPASSWORD}
+      - PIHOLE_DNS=${PIHOLE_DNS}
+      - DNSSEC=${DNSSEC}
+      - VIRTUAL_HOST=${DOMAINNAME}
+      - WEBTHEME=${WEBTHEME}
+      - PIHOLE_DOMAIN=${PIHOLE_DOMAIN}
+    volumes:
+      - '${USERDIR}/docker/pihole/pihole:/etc/pihole'
+      - '${USERDIR}/docker/pihole/dnsmasq.d:/etc/dnsmasq.d'
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.pihole.rule=Host(`pihole.${DOMAINNAME}`)
+      - traefik.http.routers.pihole.tls=true
+      - traefik.http.routers.pihole.entrypoints=websecure
+      - traefik.http.routers.pihole.loadbalancer.server.port=80
+  portainer:
+    image: portainer/portainer-ee:latest
+    container_name: portainer
+    restart: always
+    command: -H unix:///var/run/docker.sock
+    networks:
+      traefik_proxy:
+        ipv4_address: ${IPV4_ADDRESS_PORTAINER}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${USERDIR}/docker/portainer/data:/data
+      - ${USERDIR}/docker/shared:/shared
+    environment:
+      - TZ=${TZ}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.portainer.rule=Host(`portainer.${DOMAINNAME}`)
+      - traefik.http.routers.portainer.tls=true
+      - traefik.http.routers.portainer.tls.options=default
+      - traefik.http.routers.portainer.entrypoints=websecure
+      - traefik.http.routers.portainer.loadbalancer.server.port=9000
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: transmission
+    restart: always
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WHITELIST=192.168.1.*,127.0.0.1
+      - PEERPORT=55016
+    volumes:
+      - ${USERDIR}/docker/transmission:/config
+      - ${USERDIR}:/downloads
+    ports:
+      - 55016:55016
+      - 9091:9091
+      - 55016:55016/udp
+    networks:
+      traefik_proxy:
+        ipv4_address: ${IPV4_ADDRESS_TRANSMISSION}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.transmission.rule=Host(`transmission.${DOMAINNAME}`)
+      - traefik.http.routers.transmission.tls=true
+      - traefik.http.routers.transmission.tls.options=default
+      - traefik.http.routers.transmission.entrypoints=websecure
+      - traefik.http.routers.transmission.loadbalancer.server.port=9091
+  plex:
+    image: plexinc/pms-docker:latest
+    container_name: plex
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - VERSION=docker
+    volumes:
+      - ${USERDIR}/docker/plex/config:/config
+      - ${USERDIR}:/media
+    ports:
+      - 32400:32400
+    restart: unless-stopped
+    networks:
+      traefik_proxy:
+        ipv4_address: ${IPV4_ADDRESS_PLEX}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.plex.rule=Host(`plex.${DOMAINNAME}`)
+      - traefik.http.routers.plex.tls=true
+      - traefik.http.routers.plex.tls.options=default
+      - traefik.http.routers.plex.entrypoints=websecure
+      - traefik.http.routers.plex.loadbalancer.server.port=32400
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: always
+    networks:
+      traefik_proxy:
+        ipv4_address: ${IPV4_ADDRESS_WATCHTOWER}
+    environment:
+      WATCHTOWER_SCHEDULE: "0 0 1 * * *"
+      TZ: ${TZ}
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_DEBUG: "true"
+      WATCHTOWER_NOTIFICATIONS: "email"
+      WATCHTOWER_NOTIFICATIONS_EMAIL_FROM: "cldockertest@labhome.work"
+      WATCHTOWER_NOTIFICATIONS_EMAIL_TO: ${ACME_EMAIL}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --cleanup
+networks:
+  traefik_proxy:
+    driver: bridge
+    name: traefik_proxy
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.19.0.0/16
