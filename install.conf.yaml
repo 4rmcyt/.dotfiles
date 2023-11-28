@@ -3,8 +3,19 @@
 - link:
     ~/.dotfiles: ''
     ~/.zshrc: zshrc
-    ~/.oh-my-zsh: .oh-my-zsh/
-    ~/server: server/
+    ~/.oh-my-zsh:
+      path: ~/.oh-my-zsh/*
+      glob: true
+      create: true
+    ~/server:
+      path: ~/server/*
+      glob: true
+      create: true
+    ~/media-server/docker:
+      path: ~/media-server/docker/*
+      exclude: [ docker/Downloads ]
+      glob: true
+      create: true
 
 - shell:
-    - [git submodule update --init --recursive, Installing submodules]     
+    - [git submodule update --init --recursive, Installing submodules]
